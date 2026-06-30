@@ -1,0 +1,61 @@
+# .github/workflows/test-configs.yml
+name: Test Proxy Configs
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'  # every 6 hours
+
+env:
+  CONFIGS_PER_FILE: 500
+  TEST_TIMEOUT: 8
+  CONCURRENT_TESTS: 50
+  TEST_URL: "http://gstatic.com/generate_204"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install aiohttp
+
+      - name: Download latest Xray-core
+        run: |
+          LATEST=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep tag_name | cut -d'"' -f4)
+          echo "Xray version: $LATEST"
+          curl -sL "https://github.com/XTLS/Xray-core/releases/download/${LATEST}/Xray-linux-64.zip" -o xray.zip
+          unzip -o xray.zip xray -d /usr/local/bin/
+          chmod +x /usr/local/bin/xray
+          xray version
+
+      - name: Run tester
+        run: |
+          python scripts/tester.py \
+            --subscriptions subscription.txt \
+            --xray /usr/local/bin/xray \
+            --test-url "$TEST_URL" \
+            --timeout "$TEST_TIMEOUT" \
+            --concurrent "$CONCURRENT_TESTS" \
+            --per-file "$CONFIGS_PER_FILE"
+
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add vless/ vmess/ ss/ trojan/ 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Update tested configs $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push
+          fi
