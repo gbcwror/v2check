@@ -1,19 +1,15 @@
 # scripts/tester.py
-"""
-Proxy Config Tester
-Fetches subscriptions, deduplicates, tests with Xray, categorizes results.
-"""
 
 import argparse
 import asyncio
 import json
 import os
 import shutil
-import signal
 import sys
 import tempfile
 import time
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 import aiohttp
@@ -21,8 +17,15 @@ import aiohttp
 from converter import convert_link, get_protocol, build_xray_config
 
 
+PROTOCOL_DISPLAY = {
+    "vless": "VLESS",
+    "vmess": "VMess",
+    "ss": "Shadowsocks",
+    "trojan": "Trojan",
+}
+
+
 def fetch_subscriptions(sub_file: str) -> list[str]:
-    """Fetch all configs from subscription URLs."""
     all_configs = []
 
     with open(sub_file, "r", encoding="utf-8") as f:
@@ -53,7 +56,6 @@ def fetch_subscriptions(sub_file: str) -> list[str]:
 
 
 def deduplicate(configs: list[str]) -> list[str]:
-    """Remove duplicate configs preserving order."""
     seen = set()
     unique = []
     for c in configs:
@@ -73,10 +75,6 @@ async def test_single_config(
     base_port: int,
     slot: int,
 ) -> tuple[str, int]:
-    """
-    Test a single config. Returns (link, delay_ms).
-    delay_ms = -1 means failed.
-    """
     async with sem:
         socks_port = base_port + slot
         proc = None
@@ -92,7 +90,6 @@ async def test_single_config(
             json.dump(xray_config, config_file)
             config_file.close()
 
-            # Start xray
             proc = await asyncio.create_subprocess_exec(
                 xray_path, "run", "-c", config_file.name,
                 stdout=asyncio.subprocess.DEVNULL,
@@ -150,7 +147,6 @@ async def test_all_configs(
     timeout: int,
     concurrent: int,
 ) -> list[tuple[str, int]]:
-    """Test all configs concurrently. Returns list of (link, delay_ms)."""
     sem = asyncio.Semaphore(concurrent)
     base_port = 20000
 
@@ -178,8 +174,10 @@ async def test_all_configs(
     return results
 
 
-def categorize_and_save(results: list[tuple[str, int]], per_file: int):
-    """Categorize working configs by protocol and save to files."""
+def categorize_and_save(
+    results: list[tuple[str, int]],
+    per_file: int,
+) -> dict[str, list[dict]]:
     by_protocol: dict[str, list[tuple[str, int]]] = {}
 
     for link, delay in results:
@@ -194,7 +192,7 @@ def categorize_and_save(results: list[tuple[str, int]], per_file: int):
 
     if not by_protocol:
         print("No working configs found.")
-        return
+        return {}
 
     for proto in by_protocol:
         by_protocol[proto].sort(key=lambda x: x[1])
@@ -204,7 +202,9 @@ def categorize_and_save(results: list[tuple[str, int]], per_file: int):
         if proto_dir.exists():
             shutil.rmtree(proto_dir)
 
+    file_info: dict[str, list[dict]] = {}
     total_working = 0
+
     for proto, items in by_protocol.items():
         proto_dir = Path(proto)
         proto_dir.mkdir(exist_ok=True)
@@ -213,15 +213,90 @@ def categorize_and_save(results: list[tuple[str, int]], per_file: int):
         total_working += len(links)
 
         chunks = [links[i:i + per_file] for i in range(0, len(links), per_file)]
+        file_info[proto] = []
 
         for idx, chunk in enumerate(chunks, 1):
-            filename = proto_dir / f"{proto}-{idx}.txt"
-            with open(filename, "w", encoding="utf-8") as f:
+            filename = f"{proto}-{idx}.txt"
+            filepath = proto_dir / filename
+            with open(filepath, "w", encoding="utf-8") as f:
                 f.write("\n".join(chunk) + "\n")
+
+            file_info[proto].append({
+                "index": idx,
+                "count": len(chunk),
+                "path": f"{proto}/{filename}",
+            })
 
         print(f"  {proto}/: {len(links)} config(s) in {len(chunks)} file(s)")
 
     print(f"Total working: {total_working}")
+    return file_info
+
+
+def generate_readme(file_info: dict[str, list[dict]], repo_url: str):
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    lines = [
+        "# v2ray Config Collector",
+        "",
+        "Auto-tested proxy configurations, updated every 6 hours.",
+        "",
+        f"> Last update: {now}",
+        "",
+        "---",
+        "",
+        "## Statistics",
+        "",
+        "| Protocol | Working Configs | Files |",
+        "|:--------:|:---------------:|:-----:|",
+    ]
+
+    total_configs = 0
+    total_files = 0
+    protocol_order = ["vless", "vmess", "ss", "trojan"]
+
+    for proto in protocol_order:
+        if proto in file_info:
+            configs_count = sum(f["count"] for f in file_info[proto])
+            files_count = len(file_info[proto])
+            display_name = PROTOCOL_DISPLAY.get(proto, proto)
+            lines.append(f"| {display_name} | {configs_count} | {files_count} |")
+            total_configs += configs_count
+            total_files += files_count
+
+    lines.append(f"| **Total** | **{total_configs}** | **{total_files}** |")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append("## Subscription Links")
+
+    for proto in protocol_order:
+        if proto not in file_info:
+            continue
+
+        display_name = PROTOCOL_DISPLAY.get(proto, proto)
+        lines.append("")
+        lines.append(f"### {display_name}")
+        lines.append("")
+
+        for f in file_info[proto]:
+            idx = f["index"]
+            count = f["count"]
+            path = f["path"]
+            url = f"{repo_url}/{path}"
+
+            lines.append(f"> {display_name} {idx} ({count} configs)")
+            lines.append("```")
+            lines.append(url)
+            lines.append("```")
+            lines.append("")
+
+    readme_content = "\n".join(lines)
+
+    with open("README.md", "w", encoding="utf-8") as f:
+        f.write(readme_content)
+
+    print("README.md generated.")
 
 
 def main():
@@ -232,6 +307,7 @@ def main():
     parser.add_argument("--timeout", type=int, default=8)
     parser.add_argument("--concurrent", type=int, default=50)
     parser.add_argument("--per-file", type=int, default=500)
+    parser.add_argument("--repo-url", required=True)
     args = parser.parse_args()
 
     configs = fetch_subscriptions(args.subscriptions)
@@ -240,7 +316,6 @@ def main():
         sys.exit(1)
     print(f"Total fetched: {len(configs)}")
 
-    # Deduplicate
     configs = deduplicate(configs)
     print(f"After dedup: {len(configs)}")
 
@@ -272,7 +347,10 @@ def main():
     failed = sum(1 for _, d in results if d < 0)
     print(f"Results: {working} working, {failed} failed")
 
-    categorize_and_save(results, args.per_file)
+    file_info = categorize_and_save(results, args.per_file)
+
+    if file_info:
+        generate_readme(file_info, args.repo_url)
 
 
 if __name__ == "__main__":
