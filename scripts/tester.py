@@ -66,23 +66,35 @@ def deduplicate(configs: list[str]) -> list[str]:
     return unique
 
 
+class PortPool:
+    def __init__(self, base_port: int, size: int):
+        self._queue = asyncio.Queue()
+        for i in range(size):
+            self._queue.put_nowait(base_port + i)
+
+    async def acquire(self) -> int:
+        return await self._queue.get()
+
+    def release(self, port: int):
+        self._queue.put_nowait(port)
+
+
 async def test_single_config(
     sem: asyncio.Semaphore,
+    port_pool: PortPool,
     link: str,
     xray_path: str,
     test_url: str,
     timeout: int,
-    base_port: int,
-    slot: int,
 ) -> tuple[str, int]:
     async with sem:
-        socks_port = base_port + slot
+        port = await port_pool.acquire()
         proc = None
         config_file = None
 
         try:
             outbound, _ = convert_link(link)
-            xray_config = build_xray_config(outbound, socks_port)
+            xray_config = build_xray_config(outbound, port)
 
             config_file = tempfile.NamedTemporaryFile(
                 mode="w", suffix=".json", delete=False
@@ -96,12 +108,12 @@ async def test_single_config(
                 stderr=asyncio.subprocess.DEVNULL,
             )
 
-            await asyncio.sleep(1)
+            await asyncio.sleep(1.5)
 
             if proc.returncode is not None:
                 return link, -1
 
-            proxy = f"socks5://127.0.0.1:{socks_port}"
+            proxy = f"socks5://127.0.0.1:{port}"
             connector = aiohttp.TCPConnector(ssl=False)
 
             start_time = time.monotonic()
@@ -139,6 +151,8 @@ async def test_single_config(
                 except OSError:
                     pass
 
+            port_pool.release(port)
+
 
 async def test_all_configs(
     configs: list[str],
@@ -148,14 +162,13 @@ async def test_all_configs(
     concurrent: int,
 ) -> list[tuple[str, int]]:
     sem = asyncio.Semaphore(concurrent)
-    base_port = 20000
+    port_pool = PortPool(base_port=20000, size=concurrent)
 
     print(f"Testing {len(configs)} config(s) with {concurrent} concurrent workers...")
 
     tasks = []
-    for i, link in enumerate(configs):
-        slot = i % concurrent
-        task = test_single_config(sem, link, xray_path, test_url, timeout, base_port, slot)
+    for link in configs:
+        task = test_single_config(sem, port_pool, link, xray_path, test_url, timeout)
         tasks.append(task)
 
     results = []
@@ -167,7 +180,7 @@ async def test_all_configs(
         results.append(result)
         done_count += 1
 
-        if done_count % 50 == 0 or done_count == total:
+        if done_count % 100 == 0 or done_count == total:
             working = sum(1 for _, d in results if d > 0)
             print(f"  Progress: {done_count}/{total} tested, {working} working")
 
