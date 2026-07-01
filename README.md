@@ -2,7 +2,7 @@
 
 Auto-tested proxy configurations, updated every 6 hours.
 
-> Last update: 2026-07-01 05:42 UTC
+> Last update: 2026-07-01 07:11 UTC
 
 ---
 
@@ -10,11 +10,11 @@ Auto-tested proxy configurations, updated every 6 hours.
 
 | Protocol | Working Configs | Files |
 |:--------:|:---------------:|:-----:|
-| VLESS | 168 | 1 |
-| VMess | 55 | 1 |
-| Shadowsocks | 84 | 1 |
-| Trojan | 113 | 1 |
-| **Total** | **420** | **4** |
+| VLESS | 189 | 1 |
+| VMess | 110 | 1 |
+| Shadowsocks | 69 | 1 |
+| Trojan | 108 | 1 |
+| **Total** | **476** | **4** |
 
 ---
 
@@ -22,7 +22,7 @@ Auto-tested proxy configurations, updated every 6 hours.
 
 ### VLESS
 
-> VLESS 1 (168 configs)
+> VLESS 1 (189 configs)
 ```
 https://raw.githubusercontent.com/gbcwror/v2check/main/vless/vless-1.txt
 ```
@@ -30,7 +30,7 @@ https://raw.githubusercontent.com/gbcwror/v2check/main/vless/vless-1.txt
 
 ### VMess
 
-> VMess 1 (55 configs)
+> VMess 1 (110 configs)
 ```
 https://raw.githubusercontent.com/gbcwror/v2check/main/vmess/vmess-1.txt
 ```
@@ -38,7 +38,7 @@ https://raw.githubusercontent.com/gbcwror/v2check/main/vmess/vmess-1.txt
 
 ### Shadowsocks
 
-> Shadowsocks 1 (84 configs)
+> Shadowsocks 1 (69 configs)
 ```
 https://raw.githubusercontent.com/gbcwror/v2check/main/ss/ss-1.txt
 ```
@@ -46,7 +46,7 @@ https://raw.githubusercontent.com/gbcwror/v2check/main/ss/ss-1.txt
 
 ### Trojan
 
-> Trojan 1 (113 configs)
+> Trojan 1 (108 configs)
 ```
 https://raw.githubusercontent.com/gbcwror/v2check/main/trojan/trojan-1.txt
 ```
