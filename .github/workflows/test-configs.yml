@@ -10,8 +10,8 @@ permissions:
 
 env:
   CONFIGS_PER_FILE: 500
-  TEST_TIMEOUT: 8
-  CONCURRENT_TESTS: 50
+  TEST_TIMEOUT: 2
+  CONCURRENT_TESTS: 1000
   TEST_URL: "http://gstatic.com/generate_204"
   REPO_URL: "https://raw.githubusercontent.com/${{ github.repository }}/main"
 
