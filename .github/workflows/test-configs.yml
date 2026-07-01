@@ -16,7 +16,7 @@ env:
   REPO_URL: "https://raw.githubusercontent.com/${{ github.repository }}/main"
 
 jobs:
-  Test Real Delay:
+  TestRealDelay:
     runs-on: ubuntu-latest
     timeout-minutes: 300
 
