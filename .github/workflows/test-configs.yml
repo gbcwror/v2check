@@ -45,7 +45,7 @@ jobs:
 
       - name: Run tester
         run: |
-          python scripts/tester.py \
+          python -u scripts/tester.py \
             --subscriptions subscription.txt \
             --xray /usr/local/bin/xray \
             --test-url "$TEST_URL" \
