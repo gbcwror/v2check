@@ -36,9 +36,26 @@ jobs:
 
       - name: Download latest Xray-core
         run: |
-          LATEST=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep tag_name | cut -d'"' -f4)
+          LATEST=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r '.tag_name')
+          
+          if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
+            echo "Error: Failed to get latest Xray version"
+            exit 1
+          fi
+          
           echo "Xray version: $LATEST"
-          curl -sL "https://github.com/XTLS/Xray-core/releases/download/${LATEST}/Xray-linux-64.zip" -o xray.zip
+          
+          DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/download/${LATEST}/Xray-linux-64.zip"
+          echo "Download URL: $DOWNLOAD_URL"
+          
+          curl -sL -o xray.zip "$DOWNLOAD_URL"
+          
+          if ! file xray.zip | grep -q "Zip"; then
+            echo "Error: Downloaded file is not a valid zip"
+            exit 1
+          fi
+          
           unzip -o xray.zip xray -d /usr/local/bin/
           chmod +x /usr/local/bin/xray
           xray version
