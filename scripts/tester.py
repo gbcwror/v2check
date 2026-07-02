@@ -1,7 +1,13 @@
 # scripts/tester.py
+"""
+Proxy Config Tester
+Fetches subscriptions, deduplicates, tests with Xray, categorizes results.
+Generates README.md with subscription links.
+"""
 
 import argparse
 import asyncio
+import base64
 import json
 import os
 import shutil
@@ -11,6 +17,7 @@ import time
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse, unquote
 
 import aiohttp
 
@@ -24,12 +31,41 @@ PROTOCOL_DISPLAY = {
     "trojan": "Trojan",
 }
 
+SUPPORTED_PROTOCOLS = ("vless://", "vmess://", "ss://", "trojan://")
+
+
+def is_base64(text: str) -> bool:
+    """Check if text is base64 encoded."""
+    for proto in SUPPORTED_PROTOCOLS:
+        if proto in text:
+            return False
+    try:
+        padded = text.strip() + "=" * (-len(text.strip()) % 4)
+        decoded = base64.b64decode(padded).decode("utf-8")
+        for proto in SUPPORTED_PROTOCOLS:
+            if proto in decoded:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def decode_base64(text: str) -> str:
+    """Decode base64 text."""
+    padded = text.strip() + "=" * (-len(text.strip()) % 4)
+    return base64.b64decode(padded).decode("utf-8")
+
 
 def fetch_subscriptions(sub_file: str) -> list[str]:
-    all_configs = []
+    """Fetch all configs from subscription URLs."""
+    all_links = []
 
     with open(sub_file, "r", encoding="utf-8") as f:
         urls = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+
+    if not urls:
+        print("Error: No URLs found in subscription file.")
+        return []
 
     print(f"Fetching {len(urls)} subscription(s)...")
 
@@ -37,14 +73,16 @@ def fetch_subscriptions(sub_file: str) -> list[str]:
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "v2rayN/6.0"})
             with urllib.request.urlopen(req, timeout=30) as resp:
-                content = resp.read().decode("utf-8").strip()
+                raw = resp.read().decode("utf-8").strip()
 
-            lines = content.splitlines()
+            if is_base64(raw):
+                raw = decode_base64(raw)
+
             count = 0
-            for line in lines:
+            for line in raw.splitlines():
                 line = line.strip()
-                if line and "://" in line:
-                    all_configs.append(line)
+                if line and any(line.startswith(p) for p in SUPPORTED_PROTOCOLS):
+                    all_links.append(line)
                     count += 1
 
             print(f"  {url[:60]}... -> {count} config(s)")
@@ -52,17 +90,99 @@ def fetch_subscriptions(sub_file: str) -> list[str]:
         except Exception as e:
             print(f"  {url[:60]}... -> FAILED: {e}")
 
-    return all_configs
+    return all_links
+
+
+def _get_dedup_key(link: str) -> str:
+    """Generate a dedup key based on core connection identity.
+    VLESS/VMess: uuid + address + port
+    Trojan: password + address + port
+    Shadowsocks: method + password + address + port
+    """
+    link = link.strip()
+
+    try:
+        if link.startswith("vless://"):
+            parsed = urlparse(link)
+            return f"vless|{parsed.username}|{parsed.hostname}|{parsed.port}"
+
+        elif link.startswith("vmess://"):
+            raw = link[len("vmess://"):].strip()
+            raw += "=" * (-len(raw) % 4)
+            try:
+                decoded = json.loads(base64.b64decode(raw).decode("utf-8"))
+            except Exception:
+                decoded = json.loads(base64.urlsafe_b64decode(raw).decode("utf-8"))
+            return f"vmess|{decoded.get('id', '')}|{decoded.get('add', '')}|{decoded.get('port', '')}"
+
+        elif link.startswith("trojan://"):
+            parsed = urlparse(link)
+            password = unquote(parsed.username)
+            return f"trojan|{password}|{parsed.hostname}|{parsed.port}"
+
+        elif link.startswith("ss://"):
+            raw = link[len("ss://"):]
+            if "#" in raw:
+                raw = raw.rsplit("#", 1)[0]
+            if "?" in raw:
+                raw = raw.split("?", 1)[0]
+
+            if "@" in raw:
+                userinfo_part, server_part = raw.rsplit("@", 1)
+                try:
+                    padded = userinfo_part.strip() + "=" * (-len(userinfo_part.strip()) % 4)
+                    userinfo = base64.b64decode(padded).decode("utf-8")
+                except Exception:
+                    try:
+                        userinfo = base64.urlsafe_b64decode(padded).decode("utf-8")
+                    except Exception:
+                        userinfo = unquote(userinfo_part)
+
+                method, password = userinfo.split(":", 1)
+
+                if server_part.startswith("["):
+                    bracket_end = server_part.index("]")
+                    host = server_part[1:bracket_end]
+                    port = server_part[bracket_end + 2:]
+                else:
+                    host, port = server_part.rsplit(":", 1)
+
+                return f"ss|{method}|{password}|{host}|{port}"
+
+            else:
+                padded = raw.strip() + "=" * (-len(raw.strip()) % 4)
+                try:
+                    decoded_str = base64.b64decode(padded).decode("utf-8")
+                except Exception:
+                    decoded_str = base64.urlsafe_b64decode(padded).decode("utf-8")
+
+                method_pass, server_part = decoded_str.rsplit("@", 1)
+                method, password = method_pass.split(":", 1)
+
+                if server_part.startswith("["):
+                    bracket_end = server_part.index("]")
+                    host = server_part[1:bracket_end]
+                    port = server_part[bracket_end + 2:]
+                else:
+                    host, port = server_part.rsplit(":", 1)
+
+                return f"ss|{method}|{password}|{host}|{port}"
+
+    except Exception:
+        pass
+
+    return link.split("#")[0].strip()
 
 
 def deduplicate(configs: list[str]) -> list[str]:
+    """Remove duplicate configs based on core connection identity."""
     seen = set()
     unique = []
     for c in configs:
-        key = c.strip()
+        key = _get_dedup_key(c)
         if key not in seen:
             seen.add(key)
-            unique.append(key)
+            unique.append(c)
     return unique
 
 

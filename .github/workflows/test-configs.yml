@@ -16,7 +16,7 @@ env:
   REPO_URL: "https://raw.githubusercontent.com/${{ github.repository }}/main"
 
 jobs:
-  TestRealDelay:
+  test:
     runs-on: ubuntu-latest
     timeout-minutes: 300
 
@@ -46,10 +46,8 @@ jobs:
           
           echo "Xray version: $LATEST"
           
-          DOWNLOAD_URL="https://github.com/XTLS/Xray-core/releases/download/${LATEST}/Xray-linux-64.zip"
-          echo "Download URL: $DOWNLOAD_URL"
-          
-          curl -sL -o xray.zip "$DOWNLOAD_URL"
+          curl -sL -o xray.zip \
+            "https://github.com/XTLS/Xray-core/releases/download/${LATEST}/Xray-linux-64.zip"
           
           if ! file xray.zip | grep -q "Zip"; then
             echo "Error: Downloaded file is not a valid zip"
